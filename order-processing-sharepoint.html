@@ -188,6 +188,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:14px 0}
   .pm-content{box-shadow:none!important;margin:0!important;border-radius:0!important;padding:0!important;max-width:none!important}
 }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 </head>
 <body>
 
@@ -258,8 +259,11 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:14px 0}
     <div class="ch"><span class="ct">Deal Details</span></div>
     <div class="cb">
       <div class="g2" style="margin-bottom:14px">
+        <div class="fg"><label>Vendor Name <span class="req">*</span></label><input id="fvn" placeholder="e.g. Arctic Wolf, Barracuda"></div>
+        <div class="fg"></div>
         <div class="fg full"><label>Product / Description <span class="req">*</span></label>
-          <textarea id="fp" placeholder="e.g. Arctic Wolf Gold License, MDR, JumpStart Retainer &amp; Aurora Platform"></textarea></div>
+          <textarea id="fp" placeholder="Upload a Distributor PO above to auto-fill, or type manually…" rows="5"></textarea>
+          <div id="fp-parse-status" style="font-size:11px;color:#64748b;margin-top:3px"></div></div>
         <div class="fg"><label>Term <span class="req">*</span></label><input id="ft" placeholder="e.g. 36 months paid annually"></div>
         <div class="fg"><label>Billing Structure</label>
           <select id="fbt" onchange="toggleBilling()">
@@ -464,6 +468,30 @@ async function spFetch(url, opts = {}) {
   }
   if (res.status === 204) return null;
   return (await res.json()).d;
+}
+
+// Upload a file as a SharePoint list item attachment
+async function spUploadAttachment(itemId, fileName, fileContent) {
+  const token = await getToken();
+  // Delete existing attachment with same name first (ignore errors)
+  try {
+    await fetch(`${SITE}/_api/web/lists/getbytitle('${LIST}')/items(${itemId})/AttachmentFiles/getByFileName('${encodeURIComponent(fileName)}')`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}`, 'If-Match': '*' }
+    });
+  } catch(e) {}
+  const res = await fetch(`${SITE}/_api/web/lists/getbytitle('${LIST}')/items(${itemId})/AttachmentFiles/add(FileName='${encodeURIComponent(fileName)}')`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/octet-stream'
+    },
+    body: fileContent
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(()=>'');
+    console.warn(`Attachment upload failed (${res.status}):`, t);
+  }
 }
 
 async function getEntityType() {
@@ -698,23 +726,250 @@ function toggleBilling() {
 function setFile(inp, nm) {
   const f = document.getElementById(inp).files[0];
   document.getElementById(nm).textContent = f ? f.name : '';
+  if (inp === 'fdp' && f && f.type === 'application/pdf') {
+    parsePDF(f);
+  }
+}
+
+// ─── PDF PARSING ──────────────────────────────────────────────────────────────
+async function parsePDF(file) {
+  const status = document.getElementById('fp-parse-status');
+  try {
+    if (typeof pdfjsLib === 'undefined') { status.textContent = 'PDF.js not loaded — fill in manually.'; return; }
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    status.textContent = '⏳ Parsing distributor PO…';
+    const ab = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({data: new Uint8Array(ab)}).promise;
+    let fullText = '';
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p);
+      const tc = await page.getTextContent();
+      const view = page.view; // [x0,y0,w,h]
+      const pageW = view[2];
+      // Extract items with positions
+      const raw = tc.items.filter(i => i.str && i.str.trim()).map(i => ({
+        str: i.str.trim(), x: i.transform[4], y: Math.round(i.transform[5])
+      }));
+      if (!raw.length) continue;
+      // Sort top→bottom, left→right
+      raw.sort((a,b) => b.y - a.y || a.x - b.x);
+      // Group into lines (y within 4pt)
+      const lines = [];
+      for (const item of raw) {
+        const last = lines[lines.length-1];
+        if (last && Math.abs(item.y - last[0].y) <= 4) { last.push(item); }
+        else { lines.push([item]); }
+      }
+      // Build text: column gaps → 
+
+, line breaks → 
+
+      const COL_GAP = pageW * 0.04;
+      const lineStrs = lines.map(line => {
+        line.sort((a,b) => a.x - b.x);
+        const parts = [line[0].str];
+        for (let i = 1; i < line.length; i++) {
+          const gap = line[i].x - line[i-1].x;
+          if (gap > COL_GAP) parts.push(line[i].str);
+          else parts[parts.length-1] += ' ' + line[i].str;
+        }
+        return parts.join('\n\n');
+      });
+      fullText += lineStrs.join('\n') + '\n';
+    }
+    // Detect and parse
+    const result = detectAndParse(fullText);
+    if (result.items && result.items.length > 0) {
+      const desc = result.items.map(item => {
+        const parts = [];
+        if (item.partNumber) parts.push(item.partNumber);
+        const cleanDesc = (item.description || '').split('\n').slice(1).join(' ').trim();
+        if (cleanDesc) parts.push(cleanDesc);
+        if (item.quantity && item.quantity > 1) parts.push(`Qty: ${item.quantity}`);
+        return parts.join(' — ');
+      }).join('\n');
+      document.getElementById('fp').value = desc;
+      // Auto-fill vendor name if detected
+      const vendor = result.distributorName || '';
+      if (vendor && !document.getElementById('fvn').value) {
+        document.getElementById('fvn').value = vendor;
+      }
+      status.textContent = `✓ Parsed ${result.items.length} line item(s) from ${result.distributorName || 'distributor'} PO${result.quoteRef ? ' ' + result.quoteRef : ''}`;
+    } else {
+      // Fallback: show first 600 chars of raw text
+      const preview = fullText.replace(/\n+/g,' ').trim().slice(0, 600);
+      document.getElementById('fp').value = preview;
+      status.textContent = '⚠ Could not auto-parse — raw text shown. Please review.';
+    }
+  } catch(e) {
+    console.error('PDF parse error:', e);
+    if(document.getElementById('fp-parse-status'))
+      document.getElementById('fp-parse-status').textContent = '⚠ PDF parse failed — fill in manually.';
+  }
+}
+
+// ─── DISTRIBUTOR PARSERS ──────────────────────────────────────────────────────
+function detectAndParse(text) {
+  if (text.match(/Arctic Wolf|AW-CORE|Q-\d+.*Expiration Date/i)) return parseArcticWolfQuote(text);
+  if (text.match(/Infinigate|NQ-\d+/i)) return parseInfinigateQuote(text);
+  if (text.match(/\d+\s+YEAR\s+MYD|Quote Name:.*\dYMTD/i)) return parseIngramMydQuote(text);
+  if (text.match(/Ingram|QUO-[\w-]+/i)) return parseIngramQuote(text);
+  if (text.match(/CMS\s+Distribution|cmsdistribution|Quote Ref\.\s+\d{8}/i)) return parseCmsQuote(text);
+  return { quoteRef:'', quoteDate:'', distributorName:'', items:[], subtotal:0, vatAmount:0, total:0 };
+}
+function parseInfinigateQuote(text) {
+  const quoteRef = text.match(/Quotation\s+(NQ-[\w-]+)/i)?.[1] || text.match(/(NQ-\d+-\d+)/)?.[1] || '';
+  const quoteDate = text.match(/Quotation Date\s+([\d-]+)/i)?.[1] || '';
+  const distributorName = 'Infinigate';
+  const items = [];
+  const priceRows = [];
+  const priceRe = /(\d+)\n\n£([\d,]+\.\d{2})\n\n£([\d,]+\.\d{2})\n\n£([\d,]+\.\d{2})/g;
+  let pm;
+  while ((pm = priceRe.exec(text)) !== null) {
+    priceRows.push({ qty: parseInt(pm[1]), netPrice: parseFloat(pm[3].replace(/,/g,'')), extPrice: parseFloat(pm[4].replace(/,/g,'')) });
+  }
+  if (!priceRows.length) return { quoteRef, quoteDate, distributorName, items, subtotal:0, vatAmount:0, total:0 };
+  let lastPriceEnd = 0;
+  for (const match of text.matchAll(/(\d+)\n\n£[\d,]+\.\d{2}\n\n£[\d,]+\.\d{2}\n\n£[\d,]+\.\d{2}/g)) {
+    lastPriceEnd = (match.index ?? 0) + match[0].length;
+  }
+  const subtotalPos = text.indexOf('\nSubtotal', lastPriceEnd);
+  const descBlock = text.slice(lastPriceEnd, subtotalPos > 0 ? subtotalPos : undefined).trim();
+  let firstPart = '';
+  const qtyToList = text.match(/Quantity\n\n([A-Z][A-Z0-9-]{3,})\n\nList Price/);
+  if (qtyToList) firstPart = qtyToList[1];
+  else {
+    const partHeader = text.match(/#\s+Part\s*\n1\s*\n\s*([A-Z][A-Z0-9-]{4,})/);
+    if (partHeader) firstPart = partHeader[1];
+    else {
+      const firstPriceIdx = text.search(/(\d+)\n\n£[\d,]+\.\d{2}/);
+      const pre = firstPriceIdx > 0 ? text.slice(0, firstPriceIdx) : '';
+      const candidates = [...pre.matchAll(/\n([A-Z][A-Z0-9-]{4,})\n/g)];
+      firstPart = candidates.length > 0 ? candidates[candidates.length-1][1] : '';
+    }
+  }
+  const markerRe = /\n(\d+)\n\n([A-Z][A-Z0-9-]{3,})\n/g;
+  const descChunks = [];
+  const partsList = [firstPart];
+  let prevEnd = 0;
+  for (const m2 of descBlock.matchAll(markerRe)) {
+    descChunks.push(descBlock.slice(prevEnd, m2.index).trim());
+    partsList.push(m2[2]);
+    prevEnd = (m2.index ?? 0) + m2[0].length;
+  }
+  descChunks.push(descBlock.slice(prevEnd).trim());
+  for (let i = 0; i < descChunks.length && i < priceRows.length; i++) {
+    const part = partsList[i] ?? '';
+    const rawDesc = descChunks[i];
+    const { qty, netPrice, extPrice } = priceRows[i];
+    const desc = rawDesc.replace(/Transaction Comments:.*$/is,'').replace(/\s+/g,' ').trim();
+    items.push({ partNumber:part, description:`${part}\n${desc}`, unitPrice:netPrice, quantity:qty, subtotal:extPrice, vatRate:20 });
+  }
+  const subtotal = parseFloat((text.match(/Subtotal\s+£([\d,]+\.\d{2})/i)?.[1]||'0').replace(/,/g,''));
+  const vatAmount = parseFloat((text.match(/VAT\s+£([\d,]+\.\d{2})/i)?.[1]||'0').replace(/,/g,''));
+  const total = parseFloat((text.match(/Total\s+£([\d,]+\.\d{2})/i)?.[1]||'0').replace(/,/g,''));
+  return { quoteRef, quoteDate, distributorName, items, subtotal, vatAmount, total };
+}
+function parseIngramQuote(text) {
+  const quoteRef = (text.match(/Quote Reference:\s*(QUO-[\w-]+-[\w]+(?:\s*-\s*\d+)?)/i)?.[1]||'').trim();
+  const quoteDate = text.match(/Date:\s*([\d\/]+)/i)?.[1]||'';
+  const distributorName = 'Ingram Micro';
+  const items = [];
+  const priceRows = [];
+  const priceRe = /([\d,]+)\n\n([\d.]+)\n\n([\d.]+)\n\n(\d+%)\n\n([\d,]+\.\d{2})/g;
+  let pm;
+  while ((pm = priceRe.exec(text)) !== null) {
+    priceRows.push({ qty:parseInt(pm[1].replace(/,/g,'')), netUnit:parseFloat(pm[2]), total:parseFloat(pm[5].replace(/,/g,'')) });
+  }
+  const commentsMatch = text.match(/Quote Comments:\s*\n(.*?)(?:Kind regards)/s);
+  if (!commentsMatch) return { quoteRef, quoteDate, distributorName, items, subtotal:0, vatAmount:0, total:0 };
+  const commentItems = [];
+  for (const line of commentsMatch[1].split('\n').map(l=>l.trim()).filter(Boolean)) {
+    const m2 = line.match(/^([\d,]+)\s+x\s+([A-Z0-9-]+)\s*(.*)/);
+    if (m2) commentItems.push({ qty:parseInt(m2[1].replace(/,/g,'')), partLong:m2[2], note:m2[3].trim() });
+  }
+  const shortenPart = p => p.replace(/-T\d+.*$/,'');
+  for (let i = 0; i < commentItems.length; i++) {
+    const { qty, partLong, note } = commentItems[i];
+    const part = shortenPart(partLong);
+    const description = note ? `${part}\n${part} (${note})` : `${part}\n${part}`;
+    const pr = priceRows[i];
+    items.push({ partNumber:part, description, unitPrice:pr?.netUnit??0, quantity:qty, numMonths:12, subtotal:pr?.total??0, vatRate:20 });
+  }
+  const subtotal = parseFloat((text.match(/Net\s+[\d,]+\s+([\d,]+\.\d{2})/i)?.[1]||'0').replace(/,/g,''));
+  const vatAmount = parseFloat((text.match(/VAT\s+([\d,]+\.\d{2})/i)?.[1]||'0').replace(/,/g,''));
+  const total = parseFloat((text.match(/Total\s+[\d,]+\s+([\d,]+\.\d{2})/i)?.[1]||'0').replace(/,/g,''));
+  return { quoteRef, quoteDate, distributorName, items, subtotal, vatAmount, total };
+}
+function parseIngramMydQuote(text) {
+  return parseIngramQuote(text); // simplified fallback
+}
+function parseCmsQuote(text) {
+  const quoteRef = text.match(/Quote Ref\.\s+([\d]+)/i)?.[1]||'';
+  const rawDate = text.match(/Quote Date\/Time\s*:\s*([\d.]+)/i)?.[1]||'';
+  const quoteDate = rawDate.replace(/(\d{2})\.(\d{2})\.(\d{4})/,'$3-$2-$1');
+  const distributorName = 'CMS Distribution';
+  const items = [];
+  const firstSkuPos = text.search(/\d{6}\n\n[A-Z]/);
+  if (firstSkuPos < 0) return { quoteRef, quoteDate, distributorName, items, subtotal:0, vatAmount:0, total:0 };
+  const freightPos = text.indexOf('\nFreight', firstSkuPos);
+  const tableText = text.slice(firstSkuPos, freightPos > 0 ? freightPos : undefined);
+  const bPriceRe = /([\d,]+\.\d{2})\n\n([\d,]+\.\d{2})\n\n(\d+)\n\n(\d+)\n\n([\d,]+\.\d{2})/g;
+  const bPriceMatches = [...tableText.matchAll(bPriceRe)];
+  for (const pm2 of bPriceMatches) {
+    const unitPrice = parseFloat(pm2[2].replace(/,/g,''));
+    const qty = parseInt(pm2[3]);
+    const numMonths = parseInt(pm2[4]);
+    const subtotalVal = parseFloat(pm2[5].replace(/,/g,''));
+    items.push({ partNumber:'', description:'Barracuda product', unitPrice, quantity:qty, numMonths, subtotal:subtotalVal, vatRate:20 });
+  }
+  const subtotal = parseFloat((text.match(/Total ex\. VAT\s*£\s*([\d,]+\.\d{2})/i)?.[1]||'0').replace(/,/g,''));
+  const vatAmount = parseFloat((text.match(/VAT\s*£\s*([\d,]+\.\d{2})/i)?.[1]||'0').replace(/,/g,''));
+  const total = parseFloat((text.match(/Total inc\. VAT\s*£\s*([\d,]+\.\d{2})/i)?.[1]||'0').replace(/,/g,''));
+  return { quoteRef, quoteDate, distributorName, items, subtotal, vatAmount, total };
+}
+function parseArcticWolfQuote(text) {
+  const quoteRef = text.match(/Quote #:\s*(Q-[\d\s-]+)/)?.[1]?.trim()??'';
+  const quoteDate = text.match(/Expiration Date:\s*([\d/]+)/)?.[1]??'';
+  const distributorName = 'Arctic Wolf';
+  const items = [];
+  let t = text.replace(/(AW-[A-Z0-9]+)\n([A-Z0-9-]+)/g,'$1$2');
+  t = t.replace(/(AW-[A-Z0-9]+)\n([A-Z0-9-]+)/g,'$1$2');
+  const tableMatch = t.match(/Net Total\s*\n\n(.*?)Subtotal Subscription Fees/s);
+  if (!tableMatch) return { quoteRef, quoteDate, distributorName, items, subtotal:0, vatAmount:0, total:0 };
+  let table = tableMatch[1];
+  table = table.replace(/\nList Price\n\nList Total Discount\n%\n\nItem Description - One-Time Fee\n36 Month Committed Term\n\nItem\nAW-36MOCOMMIT\n\nQuantity Subscription Subscription\nStart Date\nEnd Date\n1\n\n£0\.00\n\n£0\.00\n/,'\n');
+  const rowRe = /(Arctic Wolf[^\n]+(?:\n\([^\n]+\))?)\n\n(AW-[A-Z0-9-]+)\n\n(\d+)\n\n[\d/]+\n\n[\d/]+\n\n£[\d,]+\.?\d*\n\n£[\d,]+\.?\d*(?:\n\n\d+)?\n\n£([\d,]+\.?\d*)/gm;
+  for (const m of table.matchAll(rowRe)) {
+    const desc = m[1].replace(/\n/g,' ').trim();
+    const part = m[2];
+    const qty = parseInt(m[3]);
+    const netTotal = parseFloat(m[4].replace(/,/g,''));
+    const unitPrice = qty > 0 ? Math.round((netTotal/qty)*10000)/10000 : 0;
+    items.push({ partNumber:part, description:`${part}\n${desc}`, unitPrice, quantity:qty, numMonths:12, subtotal:netTotal, vatRate:20 });
+  }
+  const subtotal = parseFloat((t.match(/Subtotal Subscription Fees.*?GBP\s*([\d,]+\.\d{2})/s)?.[1]??'0').replace(/,/g,''));
+  return { quoteRef, quoteDate, distributorName, items, subtotal, vatAmount:0, total:subtotal };
 }
 function clearForm() {
-  ['fn','fe','ff','fc','fp','ft','fy1','fy2','fy3','ftu'].forEach(id => { const el=document.getElementById(id);if(el)el.value=''; });
+  ['fn','fe','ff','fc','fp','ft','fy1','fy2','fy3','ftu','fvn'].forEach(id => { const el=document.getElementById(id);if(el)el.value=''; });
   document.getElementById('fbt').value = 'annual'; toggleBilling();
   document.getElementById('fdp-nm').textContent = '';
+  if(document.getElementById('fp-parse-status')) document.getElementById('fp-parse-status').textContent = '';
   document.getElementById('fsow-nm').textContent = '';
 }
 async function createOrder() {
   const n = document.getElementById('fn').value.trim();
+  const vn = document.getElementById('fvn').value.trim();
   const e = document.getElementById('fe').value.trim();
   const p = document.getElementById('fp').value.trim();
   const t = document.getElementById('ft').value.trim();
-  if (!n||!e||!p||!t) { showToast('Please fill in: Contact Name, Contact Email, Product, and Term.', true); return; }
+  if (!n||!e||!p||!t||!vn) { showToast('Please fill in: Contact Name, Contact Email, Vendor Name, Product, and Term.', true); return; }
   const bt = document.getElementById('fbt').value;
   const order = {
     id: 0,
     createdAt: new Date().toISOString(), stage: 'order_created',
+    vendorName: vn,
     contactName: n, contactEmail: e,
     financeEmail: document.getElementById('ff').value.trim(),
     companyName: document.getElementById('fc').value.trim(),
@@ -736,6 +991,17 @@ async function createOrder() {
     const newId = await spCreate(order);
     order.id = newId;
     await spUpdate(order);
+    // Upload attachments
+    const dpFile = document.getElementById('fdp').files[0];
+    const sowFile = document.getElementById('fsow').files[0];
+    if (dpFile) {
+      showLoader('Uploading Distributor PO…');
+      await spUploadAttachment(newId, dpFile.name, await dpFile.arrayBuffer()).catch(e => console.warn('Dist PO upload:', e));
+    }
+    if (sowFile) {
+      showLoader('Uploading Signed SoW…');
+      await spUploadAttachment(newId, sowFile.name, await sowFile.arrayBuffer()).catch(e => console.warn('SoW upload:', e));
+    }
     orders.unshift(order);
     clearForm();
     showToast('Order created ✓', false);
@@ -813,9 +1079,15 @@ async function confirmPO() {
   try {
     await spUpdate(updated);
     Object.assign(o, updated);
+    // Generate and upload the PO document to SharePoint
+    showLoader('Uploading PO to SharePoint…');
+    const poDocHtml = buildPODocHtml(updated);
+    const poDocBlob = new Blob([poDocHtml], {type: 'application/msword'});
+    const poFileName = `Broad Peak Cyber Purchase Order - ${updated.contactName||'Customer'} - ${updated.vendorName||updated.companyName||'Vendor'}.doc`;
+    await spUploadAttachment(updated.id, poFileName, await poDocBlob.arrayBuffer()).catch(e => console.warn('PO upload to SP:', e));
     closeM('mo-po');
     renderPO();
-    showToast(`${num} created ✓`, false);
+    showToast(`${num} created and saved to SharePoint ✓`, false);
     setTimeout(() => { showPrint(pendingPOId); setTimeout(() => dlDoc(pendingPOId), 400); }, 200);
   } catch(e) {
     showToast('Failed to save PO: ' + e.message, true);
@@ -1049,8 +1321,7 @@ function showPrint(id) {
 function closePrint() { document.getElementById('pm').classList.remove('open'); }
 
 // ─── DOC DOWNLOAD ─────────────────────────────────────────────────────────────
-function dlDoc(id) {
-  const o = getO(id); if (!o) return;
+function buildPODocHtml(o) {
   const billing = o.billingType==='annual'
     ? `<tr><td>Year 1</td><td>£${fmt(o.year1)}</td></tr><tr><td>Year 2</td><td>£${fmt(o.year2)}</td></tr><tr><td>Year 3</td><td>£${fmt(o.year3)}</td></tr><tr class="tot"><td><b>Total</b></td><td><b>£${fmt(o.year1+o.year2+o.year3)}</b></td></tr>`
     : `<tr class="tot"><td><b>Total (Upfront)</b></td><td><b>£${fmt(o.totalUpfront)}</b></td></tr>`;
@@ -1091,10 +1362,16 @@ ${o.financeEmail?`<p><b>Finance Email:</b> ${esc(o.financeEmail)}</p>`:''}
 <table class="sig-table"><tr><td width="45%">Authorised Signature</td><td width="10%"></td><td width="45%">Date</td></tr></table>
 <div class="foot">Broad Peak Cyber Limited · Company No. 15541837 · www.broadpeakcyber.com · This document is a purchase order and not a tax invoice.</div>
 </body></html>`;
+  return html;
+}
+
+function dlDoc(id) {
+  const o = getO(id); if (!o) return;
+  const html = buildPODocHtml(o);
   const blob = new Blob([html], {type:'application/msword'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `${o.poNumber}-Purchase-Order.doc`;
+  a.download = `Broad Peak Cyber Purchase Order - ${o.contactName||'Customer'} - ${o.vendorName||o.companyName||'Vendor'}.doc`;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
 }
 
