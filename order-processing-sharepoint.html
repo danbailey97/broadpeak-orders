@@ -760,10 +760,7 @@ async function parsePDF(file) {
         if (last && Math.abs(item.y - last[0].y) <= 4) { last.push(item); }
         else { lines.push([item]); }
       }
-      // Build text: column gaps → 
-
-, line breaks → 
-
+      // Build text: column gaps -> \n\n (pdftotext style), line breaks -> \n
       const COL_GAP = pageW * 0.04;
       const lineStrs = lines.map(line => {
         line.sort((a,b) => a.x - b.x);
