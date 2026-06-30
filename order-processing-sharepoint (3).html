@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Broad Peak — Order Processing</title>
-<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/dist/msal-browser.min.js"></script>
+<script src="https://alcdn.msauth.net/browser/2.38.4/js/msal-browser.min.js"></script>
 <style>
 :root{color-scheme:light}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -489,7 +489,7 @@ async function init() {
   showLoader('Checking authentication…');
   try {
     msalInstance = new msal.PublicClientApplication(msalConfig);
-    await msalInstance.initialize();
+    // Note: initialize() not needed for MSAL v2
 
     // Handle redirect response (after login redirect back)
     const response = await msalInstance.handleRedirectPromise();
