@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Broad Peak — Order Processing</title>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/dist/msal-browser.min.js"></script>
 <style>
 :root{color-scheme:light}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -17,6 +18,15 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .refresh-btn:hover{background:rgba(255,255,255,.2)}
 .main{max-width:1140px;margin:0 auto;padding:24px}
 .section{display:none}.section.active{display:block}
+/* SIGN IN SCREEN */
+#sign-in-screen{display:none;position:fixed;inset:0;background:#f1f5f9;z-index:500;align-items:center;justify-content:center;flex-direction:column;gap:16px}
+.si-card{background:#fff;border-radius:16px;padding:40px 56px;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.12);max-width:400px;width:90%}
+.si-logo{font-size:28px;font-weight:800;color:#1e3a5f;margin-bottom:6px}
+.si-sub{font-size:14px;color:#64748b;margin-bottom:28px}
+.si-btn{display:inline-flex;align-items:center;gap:10px;background:#0078d4;color:#fff;border:none;padding:13px 28px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;transition:background .15s}
+.si-btn:hover{background:#106ebe}
+.si-btn img{width:20px;height:20px}
+.si-note{font-size:11px;color:#94a3b8;margin-top:18px}
 /* LOADER */
 #loader{display:none;position:fixed;inset:0;background:rgba(248,250,252,.85);z-index:100;align-items:center;justify-content:center;flex-direction:column;gap:12px}
 .spin{width:36px;height:36px;border:3px solid #e2e8f0;border-top-color:#1e3a5f;border-radius:50%;animation:spin .7s linear infinite}
@@ -111,7 +121,20 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:14px 0}
 </head>
 <body>
 
-<div id="loader"><div class="spin"></div><p id="loader-msg">Loading orders from SharePoint…</p></div>
+<!-- SIGN IN SCREEN -->
+<div id="sign-in-screen">
+  <div class="si-card">
+    <div class="si-logo">🔒 Broad Peak Cyber</div>
+    <div class="si-sub">Order Processing System</div>
+    <button class="si-btn" onclick="handleSignIn()">
+      <svg width="20" height="20" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
+      Sign in with Microsoft
+    </button>
+    <div class="si-note">Sign in with your Broad Peak Microsoft account</div>
+  </div>
+</div>
+
+<div id="loader"><div class="spin"></div><p id="loader-msg">Loading…</p></div>
 <div id="toast"></div>
 
 <div class="hdr">
@@ -123,6 +146,7 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:14px 0}
     <button class="nav-btn" onclick="showTab('invoices',this)">Invoices</button>
   </nav>
   <div class="hdr-right">
+    <span id="user-name" style="font-size:11px;opacity:.7"></span>
     <span id="sync-status" style="font-size:11px;opacity:.6"></span>
     <button class="refresh-btn" onclick="refreshData()">↻ Refresh</button>
   </div>
@@ -298,6 +322,26 @@ hr{border:none;border-top:1px solid #e2e8f0;margin:14px 0}
 </div>
 
 <script>
+// ─── MSAL / AUTH CONFIG ───────────────────────────────────────────────────────
+const CLIENT_ID = '95ee888b-01ec-478e-82f2-3ad0657823a9';
+const TENANT_ID = '5d1eec11-9bce-47c8-b642-90b0bcb5b5c4';
+const REDIRECT_URI = window.location.href.split('?')[0].split('#')[0];
+
+const msalConfig = {
+  auth: {
+    clientId: CLIENT_ID,
+    authority: `https://login.microsoftonline.com/${TENANT_ID}`,
+    redirectUri: REDIRECT_URI,
+    navigateToLoginRequestUrl: true
+  },
+  cache: { cacheLocation: 'sessionStorage', storeAuthStateInCookie: true }
+};
+
+const SP_SCOPES = ['https://broadpeakcyberlimited.sharepoint.com/AllSites.Write'];
+
+let msalInstance;
+let currentAccount = null;
+
 // ─── SHAREPOINT CONFIG ────────────────────────────────────────────────────────
 const SITE = 'https://broadpeakcyberlimited.sharepoint.com/sites/Finance';
 const LIST = 'Orders';
@@ -313,24 +357,43 @@ let entityType = null;
 let pendingPOId = null;
 let pendingInvId = null;
 
+// ─── AUTH ─────────────────────────────────────────────────────────────────────
+async function getToken() {
+  if (!currentAccount) throw new Error('Not signed in');
+  try {
+    const resp = await msalInstance.acquireTokenSilent({ scopes: SP_SCOPES, account: currentAccount });
+    return resp.accessToken;
+  } catch {
+    const resp = await msalInstance.acquireTokenPopup({ scopes: SP_SCOPES, account: currentAccount });
+    return resp.accessToken;
+  }
+}
+
+async function handleSignIn() {
+  try {
+    await msalInstance.loginRedirect({ scopes: SP_SCOPES });
+  } catch (e) {
+    showToast('Sign in failed: ' + e.message, true);
+  }
+}
+
 // ─── SHAREPOINT API ───────────────────────────────────────────────────────────
 async function spFetch(url, opts = {}) {
+  const token = await getToken();
   const res = await fetch(SITE + url, {
-    credentials: 'include',
-    headers: { 'Accept': 'application/json;odata=verbose', ...opts.headers },
+    headers: {
+      'Accept': 'application/json;odata=verbose',
+      'Authorization': `Bearer ${token}`,
+      ...opts.headers
+    },
     ...opts
   });
   if (!res.ok && res.status !== 204) {
-    const txt = await res.text().catch(() => res.status);
-    throw new Error(`SharePoint error ${res.status}: ${txt}`);
+    const txt = await res.text().catch(() => String(res.status));
+    throw new Error(`SharePoint ${res.status}: ${txt}`);
   }
   if (res.status === 204) return null;
   return (await res.json()).d;
-}
-
-async function getDigest() {
-  const d = await spFetch('/_api/contextinfo', { method: 'POST', headers: { 'Content-Type': 'application/json;odata=verbose' } });
-  return d.GetContextWebInformation.FormDigestValue;
 }
 
 async function getEntityType() {
@@ -345,48 +408,63 @@ async function fetchOrders() {
   return d.results.map(item => {
     try {
       const o = JSON.parse(item.OrderData || '{}');
-      o.id = item.Id; // SP item Id is the canonical id
+      o.id = item.Id;
       return o;
     } catch { return null; }
   }).filter(Boolean);
 }
 
 async function spCreate(order) {
-  const [type, digest] = await Promise.all([getEntityType(), getDigest()]);
+  const token = await getToken();
+  const type = await getEntityType();
   const body = buildSPBody(type, order);
-  const d = await spFetch(`/_api/web/lists/getbytitle('${LIST}')/items`, {
+  // Write ops with Bearer token don't need X-RequestDigest
+  const res = await fetch(`${SITE}/_api/web/lists/getbytitle('${LIST}')/items`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json;odata=verbose', 'X-RequestDigest': digest },
+    headers: {
+      'Accept': 'application/json;odata=verbose',
+      'Content-Type': 'application/json;odata=verbose',
+      'Authorization': `Bearer ${token}`
+    },
     body: JSON.stringify(body)
   });
-  return d.Id; // return new item Id
+  if (!res.ok) { const t = await res.text(); throw new Error(`SP ${res.status}: ${t}`); }
+  const data = await res.json();
+  return data.d.Id;
 }
 
 async function spUpdate(order) {
-  const [type, digest] = await Promise.all([getEntityType(), getDigest()]);
+  const token = await getToken();
+  const type = await getEntityType();
   const body = buildSPBody(type, order);
-  await spFetch(`/_api/web/lists/getbytitle('${LIST}')/items(${order.id})`, {
+  const res = await fetch(`${SITE}/_api/web/lists/getbytitle('${LIST}')/items(${order.id})`, {
     method: 'POST',
     headers: {
+      'Accept': 'application/json;odata=verbose',
       'Content-Type': 'application/json;odata=verbose',
-      'X-RequestDigest': digest,
+      'Authorization': `Bearer ${token}`,
       'X-HTTP-Method': 'MERGE',
       'If-Match': '*'
     },
     body: JSON.stringify(body)
   });
+  if (!res.ok && res.status !== 204) { const t = await res.text(); throw new Error(`SP ${res.status}: ${t}`); }
 }
 
 async function spDelete(id) {
-  const digest = await getDigest();
-  await spFetch(`/_api/web/lists/getbytitle('${LIST}')/items(${id})`, {
+  const token = await getToken();
+  const res = await fetch(`${SITE}/_api/web/lists/getbytitle('${LIST}')/items(${id})`, {
     method: 'POST',
-    headers: { 'X-RequestDigest': digest, 'X-HTTP-Method': 'DELETE', 'If-Match': '*' }
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'X-HTTP-Method': 'DELETE',
+      'If-Match': '*'
+    }
   });
+  if (!res.ok && res.status !== 204) { const t = await res.text(); throw new Error(`SP ${res.status}: ${t}`); }
 }
 
 function buildSPBody(type, order) {
-  // Strip file objects before serialising
   const clean = { ...order };
   delete clean._spType;
   return {
@@ -408,15 +486,37 @@ function computeNextPO() {
 
 // ─── INIT & REFRESH ───────────────────────────────────────────────────────────
 async function init() {
-  showLoader('Loading orders from SharePoint…');
+  showLoader('Checking authentication…');
   try {
-    await getEntityType(); // warm up entity type
+    msalInstance = new msal.PublicClientApplication(msalConfig);
+    await msalInstance.initialize();
+
+    // Handle redirect response (after login redirect back)
+    const response = await msalInstance.handleRedirectPromise();
+    if (response) currentAccount = response.account;
+
+    const accounts = msalInstance.getAllAccounts();
+    if (accounts.length === 0) {
+      hideLoader();
+      document.getElementById('sign-in-screen').style.display = 'flex';
+      return;
+    }
+    currentAccount = accounts[0];
+    document.getElementById('user-name').textContent = currentAccount.name || currentAccount.username;
+
+    showLoader('Loading orders from SharePoint…');
+    await getEntityType();
     orders = await fetchOrders();
     setSyncStatus();
     renderTab('dashboard');
   } catch (e) {
     console.error(e);
-    showToast('Could not connect to SharePoint. Make sure you opened this file from the Finance SharePoint site. ' + e.message, true);
+    hideLoader();
+    if (e.message && e.message.includes('interaction_required')) {
+      document.getElementById('sign-in-screen').style.display = 'flex';
+    } else {
+      showToast('Error: ' + e.message, true);
+    }
   } finally {
     hideLoader();
   }
@@ -437,10 +537,7 @@ async function refreshData() {
   }
 }
 
-// Auto-refresh every 60 seconds
-setInterval(() => {
-  if (!document.hidden) refreshData();
-}, 60000);
+setInterval(() => { if (!document.hidden) refreshData(); }, 60000);
 
 function setSyncStatus() {
   const t = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
@@ -546,7 +643,7 @@ async function createOrder() {
   if (!n||!e||!p||!t) { showToast('Please fill in: Contact Name, Contact Email, Product, and Term.', true); return; }
   const bt = document.getElementById('fbt').value;
   const order = {
-    id: 0, // will be set by SP
+    id: 0,
     createdAt: new Date().toISOString(), stage: 'order_created',
     contactName: n, contactEmail: e,
     financeEmail: document.getElementById('ff').value.trim(),
@@ -568,7 +665,6 @@ async function createOrder() {
   try {
     const newId = await spCreate(order);
     order.id = newId;
-    // Update OrderData with correct id
     await spUpdate(order);
     orders.unshift(order);
     clearForm();
@@ -660,8 +756,7 @@ async function confirmPO() {
 
 // ─── TOGGLE PO SENT ───────────────────────────────────────────────────────────
 async function toggleSent(id, checked) {
-  const o = getO(id);
-  if (!o) return;
+  const o = getO(id); if (!o) return;
   const updated = { ...o, poSent: checked, poSentAt: checked ? new Date().toISOString() : null,
     stage: checked && o.stage==='po_created' ? 'po_sent' : !checked && o.stage==='po_sent' ? 'po_created' : o.stage };
   showLoader('Updating…');
