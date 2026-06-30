@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Broad Peak — Order Processing</title>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/dist/msal-browser.min.js"></script>
+<style>
+:root{color-scheme:light}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f1f5f9;color:#1e293b;min-height:100vh}
+.hdr{background:#1e3a5f;color:#fff;display:flex;align-items:center;gap:0;padding:0 24px;min-height:52px;position:sticky;top:0;z-index:50}
+.logo{font-weight:700;font-size:14px;padding:14px 20px 14px 0;border-right:1px solid rgba(255,255,255,.15);margin-right:8px;white-space:nowrap}
+.nav-btn{background:none;border:none;color:rgba(255,255,255,.65);padding:16px 14px;cursor:pointer;font-size:13px;font-weight:500;border-bottom:3px solid transparent;transition:all .15s;white-space:nowrap}
+.nav-btn:hover{color:#fff}.nav-btn.active{color:#fff;border-bottom-color:#38bdf8}
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.refresh-btn{background:rgba(255,255,255,.12);border:none;color:#fff;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500}
+.refresh-btn:hover{background:rgba(255,255,255,.2)}
+.main{max-width:1140px;margin:0 auto;padding:24px}
+.section{display:none}.section.active{display:block}
+/* SIGN IN SCREEN */
+#sign-in-screen{display:none;position:fixed;inset:0;background:#f1f5f9;z-index:500;align-items:center;justify-content:center;flex-direction:column;gap:16px}
+.si-card{background:#fff;border-radius:16px;padding:40px 56px;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.12);max-width:400px;width:90%}
+.si-logo{font-size:28px;font-weight:800;color:#1e3a5f;margin-bottom:6px}
+.si-sub{font-size:14px;color:#64748b;margin-bottom:28px}
+.si-btn{display:inline-flex;align-items:center;gap:10px;background:#0078d4;color:#fff;border:none;padding:13px 28px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;transition:background .15s}
+.si-btn:hover{background:#106ebe}
+.si-btn img{width:20px;height:20px}
+.si-note{font-size:11px;color:#94a3b8;margin-top:18px}
+/* LOADER */
+#loader{display:none;position:fixed;inset:0;background:rgba(248,250,252,.85);z-index:100;align-items:center;justify-content:center;flex-direction:column;gap:12px}
+.spin{width:36px;height:36px;border:3px solid #e2e8f0;border-top-color:#1e3a5f;border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#loader p{font-size:13px;color:#64748b;font-weight:500}
+/* ERROR TOAST */
+#toast{display:none;position:fixed;bottom:24px;right:24px;z-index:200;background:#1e293b;color:#fff;padding:12px 18px;border-radius:8px;font-size:13px;max-width:380px;box-shadow:0 8px 24px rgba(0,0,0,.2);border-left:4px solid #ef4444}
+#toast.success{border-left-color:#22c55e}
+/* CARDS */
+.card{background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden}.card+.card{margin-top:14px}
+.ch{padding:14px 18px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between}
+.ct{font-weight:600;font-size:14px}.cb{padding:18px}
+/* SECTION HEAD */
+.sh{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px}
+.sh h2{font-size:18px;font-weight:700}.sh p{font-size:12px;color:#64748b;margin-top:2px}
+/* STATS */
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:18px}
+.sc{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;text-align:center}
+.sn{font-size:24px;font-weight:700}.sl{font-size:11px;color:#64748b;margin-top:2px}
+/* TABLE */
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:9px 12px;background:#f8fafc;font-weight:600;color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #e2e8f0;white-space:nowrap}
+td{padding:11px 12px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+tr:last-child td{border-bottom:none}tr:hover td{background:#f8fafc}
+/* BADGES */
+.badge{display:inline-flex;align-items:center;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.b-blue{background:#dbeafe;color:#1d4ed8}.b-purple{background:#ede9fe;color:#6d28d9}
+.b-amber{background:#fef3c7;color:#92400e}.b-cyan{background:#cffafe;color:#0e7490}
+.b-green{background:#dcfce7;color:#15803d}
+/* FORMS */
+.fg{display:flex;flex-direction:column;gap:4px}.fg.full{grid-column:1/-1}
+.fg label{font-size:12px;font-weight:600;color:#374151}.req{color:#ef4444}
+input,select,textarea{border:1px solid #d1d5db;border-radius:7px;padding:8px 11px;font-size:13px;font-family:inherit;color:#1e293b;background:#fff;transition:border-color .15s;width:100%}
+input:focus,select:focus,textarea:focus{outline:none;border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+textarea{resize:vertical;min-height:68px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+.hint{font-size:11px;color:#94a3b8;margin-top:3px}
+/* BUTTONS */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:8px 16px;border-radius:7px;font-size:13px;font-weight:500;cursor:pointer;border:none;transition:all .15s;white-space:nowrap;font-family:inherit}
+.bp{background:#1e3a5f;color:#fff}.bp:hover{background:#1e40af}
+.bo{background:#fff;color:#374151;border:1px solid #d1d5db}.bo:hover{background:#f8fafc}
+.bd{background:#dc2626;color:#fff}.bd:hover{background:#b91c1c}
+.btn-sm{padding:5px 11px;font-size:12px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+/* FILE UPLOAD */
+.fz{border:2px dashed #d1d5db;border-radius:8px;padding:18px;text-align:center;cursor:pointer;transition:border-color .15s;background:#f9fafb;font-size:13px;color:#64748b}
+.fz:hover{border-color:#3b82f6;background:#eff6ff}.fz input{display:none}
+.fn{font-size:12px;color:#1e3a5f;font-weight:600;margin-top:5px}
+input[type=checkbox]{width:16px;height:16px;cursor:pointer;accent-color:#1e3a5f;flex-shrink:0}
+/* ALERT */
+.alert{border-radius:8px;padding:11px 14px;font-size:13px;margin-bottom:14px}
+.a-green{background:#f0fdf4;border:1px solid #bbf7d0;color:#15803d}
+.a-blue{background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8}
+/* MODALS */
+.ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:150;align-items:center;justify-content:center}
+.ov.open{display:flex}
+.mo{background:#fff;border-radius:12px;width:580px;max-width:94vw;max-height:92vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+.mh{padding:18px 22px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between}
+.mt{font-size:15px;font-weight:700}
+.mc{background:none;border:none;font-size:22px;cursor:pointer;color:#94a3b8;padding:2px 6px;line-height:1}.mc:hover{color:#374151}
+.mb{padding:22px}
+.mf{padding:14px 22px;border-top:1px solid #e2e8f0;display:flex;justify-content:flex-end;gap:8px;background:#f8fafc;border-radius:0 0 12px 12px}
+/* DETAIL ROWS */
+.dr{display:flex;gap:8px;margin-bottom:7px;font-size:13px}
+.dl{font-weight:600;min-width:130px;color:#64748b;flex-shrink:0}.dv{color:#1e293b;word-break:break-word}
+/* PROGRESS */
+.prog{display:flex;margin-bottom:20px;border-radius:6px;overflow:hidden;border:1px solid #e2e8f0}
+.ps{flex:1;padding:6px 2px;text-align:center;font-size:10px;font-weight:600;background:#f1f5f9;color:#94a3b8;border-right:1px solid #e2e8f0}
+.ps:last-child{border-right:none}.ps.done{background:#1e3a5f;color:#fff}.ps.cur{background:#38bdf8;color:#fff}
+/* EMPTY */
+.empty{text-align:center;padding:50px 20px;color:#94a3b8}.empty-icon{font-size:36px;margin-bottom:10px}
+/* TAGS */
+.tpaid{background:#dcfce7;color:#15803d;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600}
+.tunpaid{background:#fef9c3;color:#854d0e;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600}
+code{background:#f1f5f9;padding:2px 6px;border-radius:4px;font-family:monospace;font-size:12px}
+.actions{display:flex;gap:6px;flex-wrap:wrap}
+hr{border:none;border-top:1px solid #e2e8f0;margin:14px 0}
+/* PRINT */
+.pm{display:none;position:fixed;inset:0;background:#f1f5f9;z-index:300;overflow:auto}
+.pm.open{display:block}
+.pm-bar{background:#1e3a5f;color:#fff;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10}
+.pm-content{max-width:700px;margin:32px auto;background:#fff;border-radius:10px;box-shadow:0 4px 24px rgba(0,0,0,.1);padding:48px}
+@media print{
+  body>*:not(.pm){display:none!important}
+  .pm{display:block!important;position:static!important;background:#fff!important}
+  .pm-bar{display:none!important}
+  .pm-content{box-shadow:none!important;margin:0!important;border-radius:0!important;padding:0!important;max-width:none!important}
+}
+</style>
+</head>
+<body>
+
+<!-- SIGN IN SCREEN -->
+<div id="sign-in-screen">
+  <div class="si-card">
+    <div class="si-logo">🔒 Broad Peak Cyber</div>
+    <div class="si-sub">Order Processing System</div>
+    <button class="si-btn" onclick="handleSignIn()">
+      <svg width="20" height="20" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
+      Sign in with Microsoft
+    </button>
+    <div class="si-note">Sign in with your Broad Peak Microsoft account</div>
+  </div>
+</div>
+
+<div id="loader"><div class="spin"></div><p id="loader-msg">Loading…</p></div>
+<div id="toast"></div>
+
+<div class="hdr">
+  <div class="logo">🔒 Broad Peak Cyber</div>
+  <nav style="display:flex">
+    <button class="nav-btn active" onclick="showTab('dashboard',this)">Dashboard</button>
+    <button class="nav-btn" onclick="showTab('new-order',this)">New Order</button>
+    <button class="nav-btn" onclick="showTab('create-po',this)">Create PO</button>
+    <button class="nav-btn" onclick="showTab('invoices',this)">Invoices</button>
+  </nav>
+  <div class="hdr-right">
+    <span id="user-name" style="font-size:11px;opacity:.7"></span>
+    <span id="sync-status" style="font-size:11px;opacity:.6"></span>
+    <button class="refresh-btn" onclick="refreshData()">↻ Refresh</button>
+  </div>
+</div>
+
+<div class="main">
+
+<!-- DASHBOARD -->
+<div id="s-dashboard" class="section active">
+  <div class="sh"><div><h2>Order Dashboard</h2><p>Live — shared across all users via SharePoint</p></div></div>
+  <div class="stats" id="stats"></div>
+  <div class="card">
+    <div class="ch"><span class="ct">All Orders</span></div>
+    <div class="tw"><table>
+      <thead><tr>
+        <th>Customer</th><th>Product</th><th>Term</th><th>Value</th>
+        <th>PO Number</th><th>Stage</th><th>PO Sent ✓</th><th>Actions</th>
+      </tr></thead>
+      <tbody id="dash-body"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- NEW ORDER -->
+<div id="s-new-order" class="section">
+  <div class="sh"><div><h2>Create New Order</h2><p>Sales — enter customer and deal details</p></div></div>
+  <div class="card" style="margin-bottom:14px">
+    <div class="ch"><span class="ct">Customer Details</span></div>
+    <div class="cb">
+      <div class="g2">
+        <div class="fg"><label>Contact Name <span class="req">*</span></label><input id="fn" placeholder="e.g. James Peterson"></div>
+        <div class="fg"><label>Contact Email <span class="req">*</span></label><input id="fe" type="email" placeholder="e.g. james@company.com"></div>
+        <div class="fg"><label>Finance Email</label><input id="ff" type="email" placeholder="e.g. finance@company.com"></div>
+        <div class="fg"><label>Company Name <span class="req">*</span></label><input id="fc" placeholder="e.g. Reg Transfers"></div>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-bottom:14px">
+    <div class="ch"><span class="ct">Deal Details</span></div>
+    <div class="cb">
+      <div class="g2" style="margin-bottom:14px">
+        <div class="fg full"><label>Product / Description <span class="req">*</span></label>
+          <textarea id="fp" placeholder="e.g. Arctic Wolf Gold License, MDR, JumpStart Retainer &amp; Aurora Platform"></textarea></div>
+        <div class="fg"><label>Term <span class="req">*</span></label><input id="ft" placeholder="e.g. 36 months paid annually"></div>
+        <div class="fg"><label>Billing Structure</label>
+          <select id="fbt" onchange="toggleBilling()">
+            <option value="annual">Annual (multiple years)</option>
+            <option value="upfront">Upfront (one total)</option>
+          </select>
+        </div>
+      </div>
+      <div id="b-annual" class="g3">
+        <div class="fg"><label>Year 1 (£)</label><input id="fy1" type="number" step="0.01" placeholder="0.00"></div>
+        <div class="fg"><label>Year 2 (£)</label><input id="fy2" type="number" step="0.01" placeholder="0.00"></div>
+        <div class="fg"><label>Year 3 (£)</label><input id="fy3" type="number" step="0.01" placeholder="0.00"></div>
+      </div>
+      <div id="b-upfront" style="display:none">
+        <div class="fg" style="max-width:260px"><label>Total Amount (£)</label><input id="ftu" type="number" step="0.01" placeholder="0.00"></div>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-bottom:14px">
+    <div class="ch"><span class="ct">Documents</span></div>
+    <div class="cb">
+      <div class="g2">
+        <div class="fg">
+          <label>Distributor PO</label>
+          <div class="fz" onclick="document.getElementById('fdp').click()">
+            <input type="file" id="fdp" accept=".pdf,.docx,.doc" onchange="setFile('fdp','fdp-nm')">
+            <div>📎 Click to upload Distributor PO</div>
+            <div id="fdp-nm" class="fn"></div>
+          </div>
+        </div>
+        <div class="fg">
+          <label>Signed Statement of Work</label>
+          <div class="fz" onclick="document.getElementById('fsow').click()">
+            <input type="file" id="fsow" accept=".pdf,.docx,.doc" onchange="setFile('fsow','fsow-nm')">
+            <div>📎 Click to upload Signed SoW</div>
+            <div id="fsow-nm" class="fn"></div>
+          </div>
+        </div>
+      </div>
+      <p class="hint" style="margin-top:8px">Filenames recorded for reference — Finance verifies physical documents.</p>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:4px">
+    <button class="btn bo" onclick="clearForm()">Clear</button>
+    <button class="btn bp" id="create-btn" onclick="createOrder()">Create Order →</button>
+  </div>
+</div>
+
+<!-- CREATE PO -->
+<div id="s-create-po" class="section">
+  <div class="sh"><div><h2>Create Purchase Order</h2><p>Finance — generate and distribute PO documents</p></div></div>
+  <div id="po-list"></div>
+</div>
+
+<!-- INVOICES -->
+<div id="s-invoices" class="section">
+  <div class="sh"><div><h2>Customer Invoices</h2><p>Finance — confirm Xero entries and track payment</p></div></div>
+  <div class="card">
+    <div class="ch"><span class="ct">Invoice Tracker</span></div>
+    <div class="tw"><table>
+      <thead><tr>
+        <th>Customer</th><th>PO Number</th><th>Xero Ref</th>
+        <th>Excl. VAT</th><th>VAT</th><th>Total</th>
+        <th>Sent</th><th>Paid</th><th>Actions</th>
+      </tr></thead>
+      <tbody id="inv-body"></tbody>
+    </table></div>
+  </div>
+</div>
+
+</div><!-- /main -->
+
+<!-- ORDER DETAIL MODAL -->
+<div class="ov" id="mo-view">
+  <div class="mo">
+    <div class="mh"><span class="mt" id="mo-view-title">Order</span><button class="mc" onclick="closeM('mo-view')">×</button></div>
+    <div class="mb" id="mo-view-body"></div>
+    <div class="mf" id="mo-view-ft"></div>
+  </div>
+</div>
+
+<!-- PO NUMBER MODAL -->
+<div class="ov" id="mo-po">
+  <div class="mo" style="width:420px">
+    <div class="mh"><span class="mt">Confirm PO Number</span><button class="mc" onclick="closeM('mo-po')">×</button></div>
+    <div class="mb">
+      <p style="font-size:13px;color:#64748b;margin-bottom:14px">Confirm the PO number before generating documents. It cannot be changed after this step.</p>
+      <div class="fg"><label>PO Number</label><input id="po-num-input" placeholder="e.g. PO2131"></div>
+    </div>
+    <div class="mf">
+      <button class="btn bo" onclick="closeM('mo-po')">Cancel</button>
+      <button class="btn bp" id="confirm-po-btn" onclick="confirmPO()">Generate &amp; Download Documents</button>
+    </div>
+  </div>
+</div>
+
+<!-- INVOICE MODAL -->
+<div class="ov" id="mo-inv">
+  <div class="mo" style="width:480px">
+    <div class="mh"><span class="mt">Log Invoice Details</span><button class="mc" onclick="closeM('mo-inv')">×</button></div>
+    <div class="mb">
+      <div class="alert a-blue" id="inv-hint" style="margin-bottom:14px"></div>
+      <div class="g2" style="gap:12px">
+        <div class="fg full"><label>Xero Invoice Reference</label><input id="iv-ref" placeholder="e.g. INV-0123"></div>
+        <div class="fg"><label>Invoice Amount (excl. VAT) £</label><input id="iv-amt" type="number" step="0.01" placeholder="0.00"></div>
+        <div class="fg"><label>VAT Amount £</label><input id="iv-vat" type="number" step="0.01" placeholder="0.00"></div>
+        <div class="fg"><label>Invoice Sent Date</label><input id="iv-date" type="date"></div>
+        <div class="fg"><label>Invoice Paid?</label>
+          <select id="iv-paid"><option value="0">Not yet paid</option><option value="1">Paid ✓</option></select></div>
+        <div class="fg full"><label>Notes</label><textarea id="iv-notes" placeholder="e.g. Year 1 invoice, annual billing"></textarea></div>
+      </div>
+    </div>
+    <div class="mf">
+      <button class="btn bo" onclick="closeM('mo-inv')">Cancel</button>
+      <button class="btn bp" id="save-inv-btn" onclick="saveInvoice()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- PRINT PREVIEW -->
+<div class="pm" id="pm">
+  <div class="pm-bar">
+    <span style="font-weight:700;font-size:14px">🔒 Broad Peak Cyber — Purchase Order</span>
+    <div style="display:flex;gap:10px">
+      <button class="btn bo btn-sm" onclick="window.print()">🖨️ Print / Save as PDF</button>
+      <button class="btn bo btn-sm" onclick="closePrint()">✕ Close</button>
+    </div>
+  </div>
+  <div class="pm-content" id="pm-content"></div>
+</div>
+
+<script>
+// ─── MSAL / AUTH CONFIG ───────────────────────────────────────────────────────
+const CLIENT_ID = '95ee888b-01ec-478e-82f2-3ad0657823a9';
+const TENANT_ID = '5d1eec11-9bce-47c8-b642-90b0bcb5b5c4';
+const REDIRECT_URI = window.location.href.split('?')[0].split('#')[0];
+
+const msalConfig = {
+  auth: {
+    clientId: CLIENT_ID,
+    authority: `https://login.microsoftonline.com/${TENANT_ID}`,
+    redirectUri: REDIRECT_URI,
+    navigateToLoginRequestUrl: true
+  },
+  cache: { cacheLocation: 'sessionStorage', storeAuthStateInCookie: true }
+};
+
+const SP_SCOPES = ['https://broadpeakcyberlimited.sharepoint.com/AllSites.Write'];
+
+let msalInstance;
+let currentAccount = null;
+
+// ─── SHAREPOINT CONFIG ────────────────────────────────────────────────────────
+const SITE = 'https://broadpeakcyberlimited.sharepoint.com/sites/Finance';
+const LIST = 'Orders';
+
+// ─── CONSTANTS ────────────────────────────────────────────────────────────────
+const STAGES = ['order_created','po_created','po_sent','invoice_sent','paid'];
+const SLABELS = {order_created:'Order Created',po_created:'PO Created',po_sent:'PO Sent',invoice_sent:'Invoice Sent',paid:'Paid'};
+const SBADGE = {order_created:'b-blue',po_created:'b-purple',po_sent:'b-amber',invoice_sent:'b-cyan',paid:'b-green'};
+
+// ─── STATE ────────────────────────────────────────────────────────────────────
+let orders = [];
+let entityType = null;
+let pendingPOId = null;
+let pendingInvId = null;
+
+// ─── AUTH ─────────────────────────────────────────────────────────────────────
+async function getToken() {
+  if (!currentAccount) throw new Error('Not signed in');
+  try {
+    const resp = await msalInstance.acquireTokenSilent({ scopes: SP_SCOPES, account: currentAccount });
+    return resp.accessToken;
+  } catch {
+    const resp = await msalInstance.acquireTokenPopup({ scopes: SP_SCOPES, account: currentAccount });
+    return resp.accessToken;
+  }
+}
+
+async function handleSignIn() {
+  try {
+    await msalInstance.loginRedirect({ scopes: SP_SCOPES });
+  } catch (e) {
+    showToast('Sign in failed: ' + e.message, true);
+  }
+}
+
+// ─── SHAREPOINT API ───────────────────────────────────────────────────────────
+async function spFetch(url, opts = {}) {
+  const token = await getToken();
+  const res = await fetch(SITE + url, {
+    headers: {
+      'Accept': 'application/json;odata=verbose',
+      'Authorization': `Bearer ${token}`,
+      ...opts.headers
+    },
+    ...opts
+  });
+  if (!res.ok && res.status !== 204) {
+    const txt = await res.text().catch(() => String(res.status));
+    throw new Error(`SharePoint ${res.status}: ${txt}`);
+  }
+  if (res.status === 204) return null;
+  return (await res.json()).d;
+}
+
+async function getEntityType() {
+  if (entityType) return entityType;
+  const d = await spFetch(`/_api/web/lists/getbytitle('${LIST}')?$select=ListItemEntityTypeFullName`);
+  entityType = d.ListItemEntityTypeFullName;
+  return entityType;
+}
+
+async function fetchOrders() {
+  const d = await spFetch(`/_api/web/lists/getbytitle('${LIST}')/items?$select=Id,OrderData,Stage,PONumber,CompanyName&$orderby=Created desc&$top=500`);
+  return d.results.map(item => {
+    try {
+      const o = JSON.parse(item.OrderData || '{}');
+      o.id = item.Id;
+      return o;
+    } catch { return null; }
+  }).filter(Boolean);
+}
+
+async function spCreate(order) {
+  const token = await getToken();
+  const type = await getEntityType();
+  const body = buildSPBody(type, order);
+  // Write ops with Bearer token don't need X-RequestDigest
+  const res = await fetch(`${SITE}/_api/web/lists/getbytitle('${LIST}')/items`, {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json;odata=verbose',
+      'Content-Type': 'application/json;odata=verbose',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) { const t = await res.text(); throw new Error(`SP ${res.status}: ${t}`); }
+  const data = await res.json();
+  return data.d.Id;
+}
+
+async function spUpdate(order) {
+  const token = await getToken();
+  const type = await getEntityType();
+  const body = buildSPBody(type, order);
+  const res = await fetch(`${SITE}/_api/web/lists/getbytitle('${LIST}')/items(${order.id})`, {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json;odata=verbose',
+      'Content-Type': 'application/json;odata=verbose',
+      'Authorization': `Bearer ${token}`,
+      'X-HTTP-Method': 'MERGE',
+      'If-Match': '*'
+    },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok && res.status !== 204) { const t = await res.text(); throw new Error(`SP ${res.status}: ${t}`); }
+}
+
+async function spDelete(id) {
+  const token = await getToken();
+  const res = await fetch(`${SITE}/_api/web/lists/getbytitle('${LIST}')/items(${id})`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'X-HTTP-Method': 'DELETE',
+      'If-Match': '*'
+    }
+  });
+  if (!res.ok && res.status !== 204) { const t = await res.text(); throw new Error(`SP ${res.status}: ${t}`); }
+}
+
+function buildSPBody(type, order) {
+  const clean = { ...order };
+  delete clean._spType;
+  return {
+    '__metadata': { 'type': type },
+    'Title': (order.contactName || 'Unknown').substring(0, 255),
+    'OrderData': JSON.stringify(clean),
+    'Stage': (order.stage || '').substring(0, 255),
+    'PONumber': (order.poNumber || '').substring(0, 255),
+    'CompanyName': (order.companyName || '').substring(0, 255)
+  };
+}
+
+function computeNextPO() {
+  const nums = orders.filter(o => o.poNumber)
+    .map(o => parseInt((o.poNumber || '').replace(/\D/g, '')))
+    .filter(n => !isNaN(n));
+  return nums.length ? Math.max(...nums) + 1 : 2131;
+}
+
+// ─── INIT & REFRESH ───────────────────────────────────────────────────────────
+async function init() {
+  showLoader('Checking authentication…');
+  try {
+    msalInstance = new msal.PublicClientApplication(msalConfig);
+    await msalInstance.initialize();
+
+    // Handle redirect response (after login redirect back)
+    const response = await msalInstance.handleRedirectPromise();
+    if (response) currentAccount = response.account;
+
+    const accounts = msalInstance.getAllAccounts();
+    if (accounts.length === 0) {
+      hideLoader();
+      document.getElementById('sign-in-screen').style.display = 'flex';
+      return;
+    }
+    currentAccount = accounts[0];
+    document.getElementById('user-name').textContent = currentAccount.name || currentAccount.username;
+
+    showLoader('Loading orders from SharePoint…');
+    await getEntityType();
+    orders = await fetchOrders();
+    setSyncStatus();
+    renderTab('dashboard');
+  } catch (e) {
+    console.error(e);
+    hideLoader();
+    if (e.message && e.message.includes('interaction_required')) {
+      document.getElementById('sign-in-screen').style.display = 'flex';
+    } else {
+      showToast('Error: ' + e.message, true);
+    }
+  } finally {
+    hideLoader();
+  }
+}
+
+async function refreshData() {
+  showLoader('Refreshing…');
+  try {
+    orders = await fetchOrders();
+    setSyncStatus();
+    const active = document.querySelector('.section.active')?.id.replace('s-','') || 'dashboard';
+    renderTab(active);
+    showToast('Orders refreshed', false);
+  } catch (e) {
+    showToast('Refresh failed: ' + e.message, true);
+  } finally {
+    hideLoader();
+  }
+}
+
+setInterval(() => { if (!document.hidden) refreshData(); }, 60000);
+
+function setSyncStatus() {
+  const t = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  document.getElementById('sync-status').textContent = `Synced ${t}`;
+}
+
+// ─── UI HELPERS ───────────────────────────────────────────────────────────────
+function showLoader(msg) { document.getElementById('loader-msg').textContent = msg; document.getElementById('loader').style.display = 'flex'; }
+function hideLoader() { document.getElementById('loader').style.display = 'none'; }
+let toastTimer;
+function showToast(msg, err = false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = err ? '' : 'success';
+  el.style.display = 'block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.style.display = 'none', 5000);
+}
+
+function badge(stage) { return `<span class="badge ${SBADGE[stage]}">${SLABELS[stage]}</span>`; }
+function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function fmt(n) { return (+(n||0)).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fdate(iso) {
+  if(!iso)return '—';
+  try{return new Date(iso).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});}catch{return iso;}
+}
+function getO(id) { return orders.find(o => o.id == id); }
+function closeM(id) { document.getElementById(id).classList.remove('open'); }
+
+// ─── NAV ─────────────────────────────────────────────────────────────────────
+function showTab(tab, btn) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('s-'+tab).classList.add('active');
+  btn.classList.add('active');
+  renderTab(tab);
+}
+function renderTab(t) {
+  if(t==='dashboard') renderDash();
+  if(t==='create-po') renderPO();
+  if(t==='invoices') renderInv();
+}
+
+// ─── DASHBOARD ───────────────────────────────────────────────────────────────
+function renderDash() {
+  const cnt = {}; STAGES.forEach(s => cnt[s] = 0);
+  orders.forEach(o => cnt[o.stage] = (cnt[o.stage]||0) + 1);
+  document.getElementById('stats').innerHTML = [
+    {l:'New Orders',s:'order_created',c:'#3b82f6'},
+    {l:'PO Created',s:'po_created',c:'#8b5cf6'},
+    {l:'PO Sent',s:'po_sent',c:'#f59e0b'},
+    {l:'Invoiced',s:'invoice_sent',c:'#06b6d4'},
+    {l:'Paid',s:'paid',c:'#22c55e'},
+  ].map(x => `<div class="sc"><div class="sn" style="color:${x.c}">${cnt[x.s]||0}</div><div class="sl">${x.l}</div></div>`).join('');
+
+  const tbody = document.getElementById('dash-body');
+  if (!orders.length) {
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-icon">📋</div><p>No orders yet — use the New Order tab to get started.</p></div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = orders.map(o => {
+    const val = o.billingType==='upfront' ? `£${fmt(o.totalUpfront)}` : `£${fmt(o.year1)}/yr`;
+    const chk = (o.stage==='po_created'||o.stage==='po_sent'||o.stage==='invoice_sent'||o.stage==='paid')
+      ? `<input type="checkbox" ${o.poSent?'checked':''} onchange="toggleSent(${o.id},this.checked)">`
+      : `<span style="color:#d1d5db">—</span>`;
+    return `<tr>
+      <td><strong>${esc(o.contactName)}</strong><br><span style="font-size:11px;color:#64748b">${esc(o.companyName||o.contactEmail)}</span></td>
+      <td style="max-width:180px;font-size:12px">${esc((o.product||'').substring(0,70))}${(o.product||'').length>70?'…':''}</td>
+      <td style="font-size:12px">${esc(o.term)}</td>
+      <td style="font-weight:700;font-size:13px">${val}</td>
+      <td>${o.poNumber?`<code>${esc(o.poNumber)}</code>`:`<span style="color:#d1d5db;font-size:12px">—</span>`}</td>
+      <td>${badge(o.stage)}</td>
+      <td>${chk}</td>
+      <td class="actions">
+        <button class="btn bo btn-sm" onclick="viewOrder(${o.id})">View</button>
+        <button class="btn bd btn-sm" onclick="delOrder(${o.id})">✕</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ─── NEW ORDER ────────────────────────────────────────────────────────────────
+function toggleBilling() {
+  const v = document.getElementById('fbt').value;
+  document.getElementById('b-annual').style.display = v==='annual' ? '' : 'none';
+  document.getElementById('b-upfront').style.display = v==='upfront' ? '' : 'none';
+}
+function setFile(inp, nm) {
+  const f = document.getElementById(inp).files[0];
+  document.getElementById(nm).textContent = f ? f.name : '';
+}
+function clearForm() {
+  ['fn','fe','ff','fc','fp','ft','fy1','fy2','fy3','ftu'].forEach(id => { const el=document.getElementById(id);if(el)el.value=''; });
+  document.getElementById('fbt').value = 'annual'; toggleBilling();
+  document.getElementById('fdp-nm').textContent = '';
+  document.getElementById('fsow-nm').textContent = '';
+}
+async function createOrder() {
+  const n = document.getElementById('fn').value.trim();
+  const e = document.getElementById('fe').value.trim();
+  const p = document.getElementById('fp').value.trim();
+  const t = document.getElementById('ft').value.trim();
+  if (!n||!e||!p||!t) { showToast('Please fill in: Contact Name, Contact Email, Product, and Term.', true); return; }
+  const bt = document.getElementById('fbt').value;
+  const order = {
+    id: 0,
+    createdAt: new Date().toISOString(), stage: 'order_created',
+    contactName: n, contactEmail: e,
+    financeEmail: document.getElementById('ff').value.trim(),
+    companyName: document.getElementById('fc').value.trim(),
+    product: p, term: t, billingType: bt,
+    year1: parseFloat(document.getElementById('fy1').value)||0,
+    year2: parseFloat(document.getElementById('fy2').value)||0,
+    year3: parseFloat(document.getElementById('fy3').value)||0,
+    totalUpfront: parseFloat(document.getElementById('ftu').value)||0,
+    distPOFile: document.getElementById('fdp').files[0]?.name||null,
+    sowFile: document.getElementById('fsow').files[0]?.name||null,
+    poNumber:null,poCreatedAt:null,poSent:false,poSentAt:null,
+    xeroRef:null,invoiceAmount:null,invoiceVat:null,
+    invoiceSentAt:null,invoiceNotes:null,invoicePaid:false,paidAt:null,
+  };
+  const btn = document.getElementById('create-btn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  showLoader('Saving order to SharePoint…');
+  try {
+    const newId = await spCreate(order);
+    order.id = newId;
+    await spUpdate(order);
+    orders.unshift(order);
+    clearForm();
+    showToast('Order created ✓', false);
+    renderDash();
+  } catch(e) {
+    showToast('Failed to save order: ' + e.message, true);
+  } finally {
+    hideLoader(); btn.disabled = false; btn.textContent = 'Create Order →';
+  }
+}
+
+// ─── CREATE PO ────────────────────────────────────────────────────────────────
+function renderPO() {
+  const waiting = orders.filter(o => o.stage==='order_created');
+  const done = orders.filter(o => o.stage!=='order_created');
+  let html = '';
+  if (!waiting.length && !done.length) {
+    html = `<div class="card"><div class="cb"><div class="empty"><div class="empty-icon">📄</div><p>No orders yet. Create one in the New Order tab.</p></div></div></div>`;
+  } else {
+    if (waiting.length) {
+      html += `<div class="card" style="margin-bottom:14px">
+        <div class="ch"><span class="ct">⏳ Awaiting PO — ${waiting.length} order${waiting.length>1?'s':''}</span></div>
+        <div class="tw"><table><thead><tr><th>Customer</th><th>Product</th><th>Term</th><th>Value</th><th>Created</th><th>Action</th></tr></thead><tbody>`;
+      waiting.forEach(o => {
+        const val = o.billingType==='upfront' ? `£${fmt(o.totalUpfront)}` : `Year 1: £${fmt(o.year1)}`;
+        html += `<tr>
+          <td><strong>${esc(o.contactName)}</strong><br><span style="font-size:11px;color:#64748b">${esc(o.companyName||o.contactEmail)}</span></td>
+          <td style="font-size:12px;max-width:160px">${esc((o.product||'').substring(0,60))}${(o.product||'').length>60?'…':''}</td>
+          <td style="font-size:12px">${esc(o.term)}</td>
+          <td style="font-weight:700">${val}</td>
+          <td style="font-size:12px;color:#64748b">${fdate(o.createdAt)}</td>
+          <td><button class="btn bp btn-sm" onclick="startPO(${o.id})">Create PO</button></td>
+        </tr>`;
+      });
+      html += `</tbody></table></div></div>`;
+    }
+    if (done.length) {
+      html += `<div class="card">
+        <div class="ch"><span class="ct">✅ POs Created — ${done.length}</span></div>
+        <div class="tw"><table><thead><tr><th>Customer</th><th>PO Number</th><th>Created</th><th>Stage</th><th>PO Sent</th><th>Downloads</th></tr></thead><tbody>`;
+      done.forEach(o => {
+        html += `<tr>
+          <td><strong>${esc(o.contactName)}</strong><br><span style="font-size:11px;color:#64748b">${esc(o.companyName||'')}</span></td>
+          <td><code>${esc(o.poNumber)}</code></td>
+          <td style="font-size:12px;color:#64748b">${fdate(o.poCreatedAt)}</td>
+          <td>${badge(o.stage)}</td>
+          <td><input type="checkbox" ${o.poSent?'checked':''} onchange="toggleSent(${o.id},this.checked)"></td>
+          <td class="actions">
+            <button class="btn bo btn-sm" onclick="showPrint(${o.id})">🖨️ PDF</button>
+            <button class="btn bo btn-sm" onclick="dlDoc(${o.id})">📝 DOC</button>
+          </td>
+        </tr>`;
+      });
+      html += `</tbody></table></div></div>`;
+    }
+  }
+  document.getElementById('po-list').innerHTML = html;
+}
+
+function startPO(id) {
+  pendingPOId = id;
+  document.getElementById('po-num-input').value = 'PO' + computeNextPO();
+  document.getElementById('mo-po').classList.add('open');
+}
+
+async function confirmPO() {
+  const num = document.getElementById('po-num-input').value.trim();
+  if (!num) { showToast('Please enter a PO number.', true); return; }
+  const o = getO(pendingPOId);
+  if (!o) return;
+  const btn = document.getElementById('confirm-po-btn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  const updated = { ...o, poNumber: num, poCreatedAt: new Date().toISOString(), stage: 'po_created' };
+  showLoader('Saving PO to SharePoint…');
+  try {
+    await spUpdate(updated);
+    Object.assign(o, updated);
+    closeM('mo-po');
+    renderPO();
+    showToast(`${num} created ✓`, false);
+    setTimeout(() => { showPrint(pendingPOId); setTimeout(() => dlDoc(pendingPOId), 400); }, 200);
+  } catch(e) {
+    showToast('Failed to save PO: ' + e.message, true);
+  } finally {
+    hideLoader(); btn.disabled = false; btn.textContent = 'Generate & Download Documents';
+  }
+}
+
+// ─── TOGGLE PO SENT ───────────────────────────────────────────────────────────
+async function toggleSent(id, checked) {
+  const o = getO(id); if (!o) return;
+  const updated = { ...o, poSent: checked, poSentAt: checked ? new Date().toISOString() : null,
+    stage: checked && o.stage==='po_created' ? 'po_sent' : !checked && o.stage==='po_sent' ? 'po_created' : o.stage };
+  showLoader('Updating…');
+  try {
+    await spUpdate(updated);
+    Object.assign(o, updated);
+    const active = document.querySelector('.section.active')?.id.replace('s-','') || 'dashboard';
+    renderTab(active);
+  } catch(e) {
+    showToast('Update failed: ' + e.message, true);
+  } finally {
+    hideLoader();
+  }
+}
+
+// ─── DELETE ORDER ─────────────────────────────────────────────────────────────
+async function delOrder(id) {
+  if (!confirm('Delete this order? This cannot be undone.')) return;
+  showLoader('Deleting…');
+  try {
+    await spDelete(id);
+    orders = orders.filter(o => o.id != id);
+    renderDash();
+    showToast('Order deleted', false);
+  } catch(e) {
+    showToast('Delete failed: ' + e.message, true);
+  } finally {
+    hideLoader();
+  }
+}
+
+// ─── VIEW ORDER ───────────────────────────────────────────────────────────────
+function viewOrder(id) {
+  const o = getO(id); if (!o) return;
+  const ci = STAGES.indexOf(o.stage);
+  const prog = `<div class="prog">${STAGES.map((s,i) => `<div class="ps ${i<ci?'done':i===ci?'cur':''}">${SLABELS[s]}</div>`).join('')}</div>`;
+  const bilLine = o.billingType==='annual'
+    ? `Year 1: £${fmt(o.year1)} / Year 2: £${fmt(o.year2)} / Year 3: £${fmt(o.year3)}`
+    : `£${fmt(o.totalUpfront)} upfront`;
+  document.getElementById('mo-view-title').textContent = `${o.contactName} — ${o.poNumber||'No PO yet'}`;
+  document.getElementById('mo-view-body').innerHTML = `${prog}
+    <div class="dr"><span class="dl">Contact</span><span class="dv">${esc(o.contactName)} &lt;${esc(o.contactEmail)}&gt;</span></div>
+    ${o.financeEmail?`<div class="dr"><span class="dl">Finance Email</span><span class="dv">${esc(o.financeEmail)}</span></div>`:''}
+    ${o.companyName?`<div class="dr"><span class="dl">Company</span><span class="dv">${esc(o.companyName)}</span></div>`:''}
+    <div class="dr"><span class="dl">Product</span><span class="dv">${esc(o.product)}</span></div>
+    <div class="dr"><span class="dl">Term</span><span class="dv">${esc(o.term)}</span></div>
+    <div class="dr"><span class="dl">Billing</span><span class="dv">${bilLine}</span></div>
+    ${o.distPOFile?`<div class="dr"><span class="dl">Distributor PO</span><span class="dv">📎 ${esc(o.distPOFile)}</span></div>`:''}
+    ${o.sowFile?`<div class="dr"><span class="dl">Signed SoW</span><span class="dv">📎 ${esc(o.sowFile)}</span></div>`:''}
+    ${o.poNumber?`<hr><div class="dr"><span class="dl">PO Number</span><span class="dv"><code>${esc(o.poNumber)}</code></span></div>`:''}
+    ${o.poCreatedAt?`<div class="dr"><span class="dl">PO Created</span><span class="dv">${fdate(o.poCreatedAt)}</span></div>`:''}
+    ${o.poSent?`<div class="dr"><span class="dl">PO Sent</span><span class="dv">✅ ${fdate(o.poSentAt)}</span></div>`:''}
+    ${o.xeroRef?`<hr><div class="dr"><span class="dl">Xero Reference</span><span class="dv">${esc(o.xeroRef)}</span></div>`:''}
+    ${o.invoiceAmount!=null?`<div class="dr"><span class="dl">Invoice</span><span class="dv">£${fmt(o.invoiceAmount)} + £${fmt(o.invoiceVat||0)} VAT = £${fmt((o.invoiceAmount||0)+(o.invoiceVat||0))}</span></div>`:''}
+    ${o.invoiceSentAt?`<div class="dr"><span class="dl">Invoice Sent</span><span class="dv">${fdate(o.invoiceSentAt)}</span></div>`:''}
+    ${o.invoicePaid?`<div class="dr"><span class="dl">Paid</span><span class="dv">✅ ${fdate(o.paidAt)}</span></div>`:''}
+    ${o.invoiceNotes?`<div class="dr"><span class="dl">Notes</span><span class="dv">${esc(o.invoiceNotes)}</span></div>`:''}
+  `;
+  document.getElementById('mo-view-ft').innerHTML = `
+    ${o.poNumber?`<button class="btn bo btn-sm" onclick="showPrint(${o.id})">🖨️ PDF</button>
+    <button class="btn bo btn-sm" onclick="dlDoc(${o.id})">📝 DOC</button>`:''}
+    <button class="btn bo" onclick="closeM('mo-view')">Close</button>
+  `;
+  document.getElementById('mo-view').classList.add('open');
+}
+
+// ─── INVOICES ─────────────────────────────────────────────────────────────────
+function renderInv() {
+  const inv = orders.filter(o => o.stage !== 'order_created');
+  const tbody = document.getElementById('inv-body');
+  if (!inv.length) {
+    tbody.innerHTML = `<tr><td colspan="9"><div class="empty"><div class="empty-icon">🧾</div><p>No POs created yet.</p></div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = inv.map(o => {
+    const tot = (o.invoiceAmount!=null && o.invoiceVat!=null) ? `£${fmt((o.invoiceAmount||0)+(o.invoiceVat||0))}` : '—';
+    const paidUI = o.invoicePaid
+      ? `<span class="tpaid">Paid ✓</span>`
+      : o.invoiceSentAt
+        ? `<span class="tunpaid">Awaiting</span> <input type="checkbox" title="Mark paid" onchange="markPaid(${o.id},this.checked)" style="margin-left:4px">`
+        : `<span style="color:#d1d5db;font-size:12px">—</span>`;
+    return `<tr>
+      <td><strong>${esc(o.contactName)}</strong><br><span style="font-size:11px;color:#64748b">${esc(o.companyName||'')}</span></td>
+      <td><code>${esc(o.poNumber||'—')}</code></td>
+      <td>${o.xeroRef?`<code style="background:#f0fdf4">${esc(o.xeroRef)}</code>`:`<span style="color:#94a3b8;font-size:12px">Not logged</span>`}</td>
+      <td>${o.invoiceAmount!=null?`£${fmt(o.invoiceAmount)}`:'—'}</td>
+      <td>${o.invoiceVat!=null?`£${fmt(o.invoiceVat)}`:'—'}</td>
+      <td style="font-weight:700">${tot}</td>
+      <td style="font-size:12px">${fdate(o.invoiceSentAt)}</td>
+      <td>${paidUI}</td>
+      <td><button class="btn bo btn-sm" onclick="openInv(${o.id})">${o.xeroRef?'Update':'Log Invoice'}</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function openInv(id) {
+  pendingInvId = id;
+  const o = getO(id);
+  const hint = o.billingType==='annual'
+    ? `Annual billing — Year 1 invoice: £${fmt(o.year1)} + 20% VAT (£${fmt(o.year1*0.2)}) = £${fmt(o.year1*1.2)}. Note: for annual billing the invoice may be for just the first year.`
+    : `Upfront billing — invoice: £${fmt(o.totalUpfront)} + 20% VAT (£${fmt(o.totalUpfront*0.2)}) = £${fmt(o.totalUpfront*1.2)}.`;
+  document.getElementById('inv-hint').textContent = hint;
+  document.getElementById('iv-ref').value = o.xeroRef||'';
+  document.getElementById('iv-amt').value = o.invoiceAmount||'';
+  document.getElementById('iv-vat').value = o.invoiceVat||'';
+  document.getElementById('iv-date').value = o.invoiceSentAt ? o.invoiceSentAt.split('T')[0] : '';
+  document.getElementById('iv-paid').value = o.invoicePaid ? '1' : '0';
+  document.getElementById('iv-notes').value = o.invoiceNotes||'';
+  document.getElementById('mo-inv').classList.add('open');
+}
+
+async function saveInvoice() {
+  const o = getO(pendingInvId); if (!o) return;
+  const d = document.getElementById('iv-date').value;
+  const paid = document.getElementById('iv-paid').value === '1';
+  const updated = { ...o,
+    xeroRef: document.getElementById('iv-ref').value.trim()||null,
+    invoiceAmount: parseFloat(document.getElementById('iv-amt').value)||null,
+    invoiceVat: parseFloat(document.getElementById('iv-vat').value)||null,
+    invoiceSentAt: d ? new Date(d).toISOString() : null,
+    invoiceNotes: document.getElementById('iv-notes').value.trim()||null,
+    invoicePaid: paid,
+    paidAt: paid ? (o.paidAt||new Date().toISOString()) : null,
+  };
+  if (paid) updated.stage = 'paid';
+  else if (d && (o.stage==='po_created'||o.stage==='po_sent')) updated.stage = 'invoice_sent';
+  const btn = document.getElementById('save-inv-btn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  showLoader('Saving invoice details…');
+  try {
+    await spUpdate(updated);
+    Object.assign(o, updated);
+    closeM('mo-inv');
+    renderInv();
+    showToast('Invoice details saved ✓', false);
+  } catch(e) {
+    showToast('Save failed: ' + e.message, true);
+  } finally {
+    hideLoader(); btn.disabled = false; btn.textContent = 'Save';
+  }
+}
+
+async function markPaid(id, checked) {
+  const o = getO(id); if (!o) return;
+  const updated = { ...o, invoicePaid: checked, paidAt: checked ? new Date().toISOString() : null,
+    stage: checked ? 'paid' : 'invoice_sent' };
+  showLoader('Updating…');
+  try {
+    await spUpdate(updated);
+    Object.assign(o, updated);
+    renderInv();
+    showToast(checked ? 'Marked as paid ✓' : 'Marked as unpaid', false);
+  } catch(e) {
+    showToast('Update failed: ' + e.message, true);
+  } finally {
+    hideLoader();
+  }
+}
+
+// ─── PDF PRINT ────────────────────────────────────────────────────────────────
+function showPrint(id) {
+  const o = getO(id); if (!o) return;
+  const billing = o.billingType==='annual'
+    ? `<tr><td>Year 1</td><td style="text-align:right;font-weight:600">£${fmt(o.year1)}</td></tr>
+       <tr><td>Year 2</td><td style="text-align:right;font-weight:600">£${fmt(o.year2)}</td></tr>
+       <tr><td>Year 3</td><td style="text-align:right;font-weight:600">£${fmt(o.year3)}</td></tr>
+       <tr style="border-top:2px solid #1e3a5f"><td><strong>Total</strong></td><td style="text-align:right"><strong>£${fmt(o.year1+o.year2+o.year3)}</strong></td></tr>`
+    : `<tr class="tot"><td><strong>Total (Paid Upfront)</strong></td><td style="text-align:right"><strong>£${fmt(o.totalUpfront)}</strong></td></tr>`;
+  document.getElementById('pm-content').innerHTML = `
+    <div style="background:#1e3a5f;color:#fff;padding:24px 32px;margin:-48px -48px 32px -48px;border-radius:10px 10px 0 0">
+      <div style="font-size:20px;font-weight:700;margin-bottom:4px">BROAD PEAK CYBER LIMITED</div>
+      <div style="font-size:11px;opacity:.75">Yorkshire House, Greek Street, Leeds, LS1 5SH &nbsp;|&nbsp; tim.blakey@broadpeakcyber.com &nbsp;|&nbsp; 0333 358 3525 &nbsp;|&nbsp; Reg No. 15541837</div>
+    </div>
+    <div style="text-align:center;margin-bottom:20px">
+      <div style="font-size:26px;font-weight:800;color:#1e3a5f;letter-spacing:1px">PURCHASE ORDER</div>
+      <div style="font-size:14px;color:#64748b;margin-top:4px">${esc(o.poNumber)}</div>
+    </div>
+    <div style="background:#f1f5f9;border-radius:8px;padding:14px 18px;margin-bottom:24px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:13px">
+        <div><strong>PO Number:</strong> ${esc(o.poNumber)}</div>
+        <div><strong>Date:</strong> ${fdate(o.poCreatedAt)}</div>
+        <div><strong>Customer:</strong> ${esc(o.companyName||o.contactName)}</div>
+        <div><strong>Term:</strong> ${esc(o.term)}</div>
+      </div>
+    </div>
+    <div style="margin-bottom:20px">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#1e3a5f;border-bottom:2px solid #1e3a5f;padding-bottom:4px;margin-bottom:10px">Contact Details</div>
+      <div style="font-size:13px;display:grid;gap:4px">
+        <div><strong>Name:</strong> ${esc(o.contactName)}</div>
+        <div><strong>Email:</strong> ${esc(o.contactEmail)}</div>
+        ${o.financeEmail?`<div><strong>Finance Email:</strong> ${esc(o.financeEmail)}</div>`:''}
+      </div>
+    </div>
+    <div style="margin-bottom:20px">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#1e3a5f;border-bottom:2px solid #1e3a5f;padding-bottom:4px;margin-bottom:10px">Product / Description</div>
+      <div style="font-size:13px;white-space:pre-wrap">${esc(o.product)}</div>
+    </div>
+    <div style="margin-bottom:24px">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#1e3a5f;border-bottom:2px solid #1e3a5f;padding-bottom:4px;margin-bottom:10px">Billing Structure to Broad Peak</div>
+      <table style="font-size:13px;width:280px;border-collapse:collapse">
+        <thead><tr style="background:#1e3a5f;color:#fff"><th style="padding:6px 12px;text-align:left">Period</th><th style="padding:6px 12px;text-align:right">Amount (excl. VAT)</th></tr></thead>
+        <tbody style="border:1px solid #e2e8f0">${billing}</tbody>
+      </table>
+      <style>tbody tr td{padding:7px 12px;border-bottom:1px solid #f1f5f9}</style>
+    </div>
+    <div style="margin-top:32px;padding-top:16px;border-top:1px solid #e2e8f0">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:12px">
+        <div><div style="border-top:1px solid #1e3a5f;padding-top:6px;font-size:11px;color:#64748b">Authorised Signature</div></div>
+        <div><div style="border-top:1px solid #1e3a5f;padding-top:6px;font-size:11px;color:#64748b">Date</div></div>
+      </div>
+    </div>
+    <div style="text-align:center;font-size:10px;color:#94a3b8;margin-top:32px;padding-top:12px;border-top:1px solid #e2e8f0">
+      Broad Peak Cyber Limited · Company No. 15541837 · www.broadpeakcyber.com<br>
+      This document is a purchase order and not a tax invoice.
+    </div>
+  `;
+  document.getElementById('pm').classList.add('open');
+}
+
+function closePrint() { document.getElementById('pm').classList.remove('open'); }
+
+// ─── DOC DOWNLOAD ─────────────────────────────────────────────────────────────
+function dlDoc(id) {
+  const o = getO(id); if (!o) return;
+  const billing = o.billingType==='annual'
+    ? `<tr><td>Year 1</td><td>£${fmt(o.year1)}</td></tr><tr><td>Year 2</td><td>£${fmt(o.year2)}</td></tr><tr><td>Year 3</td><td>£${fmt(o.year3)}</td></tr><tr class="tot"><td><b>Total</b></td><td><b>£${fmt(o.year1+o.year2+o.year3)}</b></td></tr>`
+    : `<tr class="tot"><td><b>Total (Upfront)</b></td><td><b>£${fmt(o.totalUpfront)}</b></td></tr>`;
+  const html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'>
+<head><meta charset='utf-8'><title>${esc(o.poNumber)}</title>
+<style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;margin:2.5cm;color:#111}
+.hdr{background:#1e3a5f;color:#fff;padding:18pt 24pt;margin:-2.5cm -2.5cm 24pt -2.5cm}
+.hdr h1{font-size:16pt;margin:0 0 3pt 0}.hdr p{font-size:8pt;margin:0;opacity:.8}
+.po-title{font-size:22pt;font-weight:bold;color:#1e3a5f;text-align:center;margin:0 0 4pt 0}
+.po-ref{text-align:center;color:#666;margin-bottom:18pt;font-size:11pt}
+.meta{background:#f1f5f9;padding:10pt 14pt;margin-bottom:14pt}
+.meta table{width:100%;border:none;font-size:10pt}.meta td{padding:2pt 5pt;border:none}
+.lbl{font-weight:bold;color:#1e3a5f}
+h2{font-size:10pt;color:#1e3a5f;border-bottom:1pt solid #1e3a5f;padding-bottom:2pt;margin:12pt 0 6pt 0;text-transform:uppercase;letter-spacing:.5pt}
+p{font-size:10pt;margin:3pt 0}
+table.bt{width:280pt;border-collapse:collapse;font-size:10pt}
+table.bt th{background:#1e3a5f;color:#fff;padding:5pt 10pt;text-align:left}
+table.bt td{padding:4pt 10pt;border-bottom:.5pt solid #ddd}
+table.bt .tot td{font-weight:bold;background:#f1f5f9;border-top:1pt solid #1e3a5f}
+.sig-table{width:100%;margin-top:24pt}
+.sig-table td{font-size:8pt;color:#888;padding-top:4pt;border-top:.5pt solid #333}
+.foot{font-size:7.5pt;color:#999;text-align:center;margin-top:32pt;border-top:.5pt solid #ddd;padding-top:6pt}
+</style></head><body>
+<div class="hdr"><h1>BROAD PEAK CYBER LIMITED</h1>
+<p>Yorkshire House, Greek Street, Leeds, LS1 5SH &nbsp;|&nbsp; tim.blakey@broadpeakcyber.com &nbsp;|&nbsp; 0333 358 3525 &nbsp;|&nbsp; Reg No. 15541837</p></div>
+<p class="po-title">PURCHASE ORDER</p><p class="po-ref">${esc(o.poNumber)}</p>
+<div class="meta"><table>
+  <tr><td class="lbl">PO Number:</td><td>${esc(o.poNumber)}</td><td class="lbl">Date:</td><td>${fdate(o.poCreatedAt)}</td></tr>
+  <tr><td class="lbl">Customer:</td><td colspan="3">${esc(o.companyName||o.contactName)}</td></tr>
+</table></div>
+<h2>Contact Details</h2>
+<p><b>Name:</b> ${esc(o.contactName)}</p><p><b>Email:</b> ${esc(o.contactEmail)}</p>
+${o.financeEmail?`<p><b>Finance Email:</b> ${esc(o.financeEmail)}</p>`:''}
+<h2>Product / Description</h2><p>${esc(o.product).replace(/\n/g,'<br>')}</p><p><b>Term:</b> ${esc(o.term)}</p>
+<h2>Billing Structure to Broad Peak</h2>
+<table class="bt"><thead><tr><th>Period</th><th>Amount (excl. VAT)</th></tr></thead><tbody>${billing}</tbody></table>
+<h2>Authorisation</h2><p>This Purchase Order is issued by Broad Peak Cyber Limited.</p>
+<table class="sig-table"><tr><td width="45%">Authorised Signature</td><td width="10%"></td><td width="45%">Date</td></tr></table>
+<div class="foot">Broad Peak Cyber Limited · Company No. 15541837 · www.broadpeakcyber.com · This document is a purchase order and not a tax invoice.</div>
+</body></html>`;
+  const blob = new Blob([html], {type:'application/msword'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${o.poNumber}-Purchase-Order.doc`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+// ─── START ────────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
